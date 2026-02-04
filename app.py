@@ -79,7 +79,7 @@ with st.sidebar:
 
     model_name = st.selectbox(
         "اختار الموديل",
-        ["gemini-1.5-flash", "gemini-1.5-pro"],
+        ["gemini-3-flash-preview", "gemini-1.5-pro"],
         index=0,
     )
 
@@ -169,3 +169,4 @@ if user_text:
         render_markdown_with_codeblocks(answer)
 
     st.session_state.messages.append({"role": "assistant", "content": answer})
+
