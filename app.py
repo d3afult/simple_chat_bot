@@ -10,9 +10,8 @@ CODE_BLOCK_RE = re.compile(r"```(\w+)?\n(.*?)```", re.DOTALL)
 
 def render_markdown_with_codeblocks(text: str):
     """
-    Renders markdown text but extracts triple-backtick code blocks and renders them
-    using st.code (gives nicer formatting + built-in copy button in Streamlit).
-    The rest is rendered via st.markdown.
+    Renders markdown but extracts triple-backtick code blocks and renders them
+    via st.code for nicer formatting + copy button.
     """
     pos = 0
     for m in CODE_BLOCK_RE.finditer(text):
@@ -20,17 +19,13 @@ def render_markdown_with_codeblocks(text: str):
         lang = (m.group(1) or "").strip()
         code = m.group(2) or ""
 
-        # markdown before codeblock
         before = text[pos:start]
         if before.strip():
             st.markdown(before, unsafe_allow_html=False)
 
-        # codeblock
         st.code(code, language=lang if lang else None)
-
         pos = end
 
-    # remaining markdown
     rest = text[pos:]
     if rest.strip():
         st.markdown(rest, unsafe_allow_html=False)
@@ -39,13 +34,11 @@ def render_markdown_with_codeblocks(text: str):
 # Page setup
 # -----------------------------
 st.set_page_config(page_title="Gemini Chatbot", page_icon="💬", layout="centered")
-st.title("💬 Gemini Chatbot (Streamlit)")
+st.title("💬 Gemini Chatbot")
 
 # -----------------------------
 # Simple Login (password gate)
 # -----------------------------
-# Put this in Streamlit Secrets or environment variable:
-# APP_PASSWORD = "your_password"
 APP_PASSWORD = os.getenv("APP_PASSWORD", "")
 
 if "auth_ok" not in st.session_state:
@@ -54,16 +47,20 @@ if "auth_ok" not in st.session_state:
 def login_ui():
     st.subheader("🔒 تسجيل دخول")
     st.caption("أدخل كلمة السر باش تفتح الشات.")
-    pwd = st.text_input("كلمة السر", type="password")
-    if st.button("دخول", use_container_width=True):
+    pwd = st.text_input("كلمة السر", type="password", placeholder="••••••••••")
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        do_login = st.button("دخول", use_container_width=True)
+    with c2:
+        st.button("مسح", use_container_width=True, on_click=lambda: None)
+
+    if do_login:
         if APP_PASSWORD and pwd == APP_PASSWORD:
             st.session_state.auth_ok = True
             st.rerun()
         else:
             st.error("كلمة السر غلط، أو APP_PASSWORD مش متحطوطة.")
 
-# إذا ما فيش باسورد أصلاً، نعتبره مفتوح (اختياري)
-# لكن الأفضل تحط باسورد.
 if APP_PASSWORD:
     if not st.session_state.auth_ok:
         login_ui()
@@ -72,41 +69,46 @@ else:
     st.info("⚠️ APP_PASSWORD مش متحطوطة. التطبيق مفتوح بدون تسجيل دخول.")
 
 # -----------------------------
-# Sidebar controls
+# Sidebar: cleaner layout (no model / no temperature)
 # -----------------------------
 with st.sidebar:
-    st.header("⚙️ الإعدادات")
+    st.markdown("### ⚙️ التحكم")
 
-    model_name = st.selectbox(
-        "اختار الموديل",
-        ["gemini-3-flash-preview", "gemini-1.5-pro"],
-        index=0,
-    )
-
-    temperature = st.slider("Temperature (إبداع الرد)", 0.0, 1.0, 0.5, 0.1)
-
-    system_prompt = st.text_area(
-        "System Prompt (اختياري)",
-        value="أنت مساعد مفيد. لما المستخدم يطلب كود، رجّع الكود داخل ثلاث backticks ``` مع تحديد اللغة.",
-        height=110,
-    )
-
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("🧹 مسح المحادثة", use_container_width=True):
+    # أزرار سريعة بشكل أنظف
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("🧹 مسح الشات", use_container_width=True):
             st.session_state.messages = []
             st.rerun()
-
-    with col2:
+    with c2:
         if st.button("🚪 خروج", use_container_width=True):
             st.session_state.auth_ok = False
             st.rerun()
 
+    st.divider()
+
+    # System prompt بتصميم أحسن: داخل Expander + نص افتراضي محترم
+    with st.expander("🧠 System Prompt", expanded=False):
+        st.caption("هذا يوجّه البوت كيف يجاوب. (اختياري)")
+        default_prompt = (
+            "أنت مساعد مفيد. جاوب بوضوح وباختصار.\n"
+            "إذا المستخدم طلب كود، رجّع الكود داخل ``` مع تحديد اللغة.\n"
+            "لو المستخدم يكتب باللهجة الليبية، جاوبه باللهجة الليبية."
+        )
+        system_prompt = st.text_area(
+            label="",
+            value=st.session_state.get("system_prompt", default_prompt),
+            height=140,
+            placeholder="اكتب تعليمات للبوت هنا...",
+        )
+        st.session_state.system_prompt = system_prompt
+
+    st.divider()
+    st.caption("Model: gemini-3-flash-preview")
+
 # -----------------------------
 # API key (Gemini)
 # -----------------------------
-# Put this in Streamlit Secrets or environment variable:
-# GEMINI_API_KEY = "your_key"
 API_KEY = os.getenv("GEMINI_API_KEY", "")
 
 if not API_KEY:
@@ -118,14 +120,12 @@ if not API_KEY:
 
 genai.configure(api_key=API_KEY)
 
-generation_config = genai.types.GenerationConfig(
-    temperature=temperature,
-)
+# موديل واحد ثابت حسب طلبك
+MODEL_NAME = "gemini-3-flash-preview"
 
 model = genai.GenerativeModel(
-    model_name=model_name,
-    generation_config=generation_config,
-    system_instruction=system_prompt if system_prompt.strip() else None,
+    model_name=MODEL_NAME,
+    system_instruction=st.session_state.get("system_prompt", None),
 )
 
 # -----------------------------
@@ -147,6 +147,7 @@ for msg in st.session_state.messages:
 user_text = st.chat_input("اكتب رسالتك هنا...")
 
 if user_text:
+    # Store + show user message
     st.session_state.messages.append({"role": "user", "content": user_text})
     with st.chat_message("user"):
         render_markdown_with_codeblocks(user_text)
@@ -157,6 +158,7 @@ if user_text:
         role = "user" if m["role"] == "user" else "model"
         history.append({"role": role, "parts": [m["content"]]})
 
+    # Generate response
     with st.chat_message("assistant"):
         with st.spinner("⏳ نستنى في رد Gemini..."):
             try:
@@ -169,4 +171,3 @@ if user_text:
         render_markdown_with_codeblocks(answer)
 
     st.session_state.messages.append({"role": "assistant", "content": answer})
-
